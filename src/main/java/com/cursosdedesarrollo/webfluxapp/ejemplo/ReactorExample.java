@@ -1,13 +1,38 @@
 package com.cursosdedesarrollo.webfluxapp.ejemplo;
 
+import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.Persona;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
 public class ReactorExample {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
+        // defino el mono de string
+        Mono<String> mensaje=Mono.just("hola");
+        // asigno un método al subscribe
+        mensaje.subscribe(System.out::println);
+
+        // defino el mono con un tipo personalizado
+        Mono<Persona> mensaje2=Mono.just(new Persona("David","Vaquero",44));
+        // asigno un método al subscribe
+        mensaje2.subscribe(System.out::println);
+
+        Mono<Persona> mensaje3=Mono.just(new Persona("pepe","perez",20))
+                .delayElement(Duration.ofSeconds(2));
+
+        mensaje.subscribe(System.out::println);
+
+        Thread.sleep(3000);
+
+        System.out.println("Flux");
+        Flux<String> mensaje4=Flux.just("hola" ,"que" ,"tal","estas","tu");
+
+        mensaje4.subscribe(System.out::println);
+
+
         // Crear un Mono con un valor inicial
         Mono<String> mono = Mono.just("Hola");
 
@@ -174,6 +199,10 @@ public class ReactorExample {
         //
         //Emite solo los primeros n elementos emitidos por el Flux.
         Flux<Integer> numeros3 = Flux.range(1, 10);
+        numeros3.subscribe(combi -> System.out.println("Dato emitido: " + combi),
+                error -> System.err.println("Error: " + error),
+                () -> System.out.println("Flux completado")
+        );
         Flux<Integer> primerosTres = numeros3.take(3);
         primerosTres.subscribe(combi -> System.out.println("Dato emitido: " + combi),
                 error -> System.err.println("Error: " + error),
