@@ -1,7 +1,6 @@
 package com.cursosdedesarrollo.webfluxapp.ejemplo.controllers;
 
 import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.Person;
-import jdk.jfr.FlightRecorder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,5 +36,16 @@ public class MainController {
         List<Person> listado = new ArrayList<>();
         listado.add(p);
         return Flux.just(listado);
+    }
+    @GetMapping("/list-iterable")
+    @ResponseStatus(HttpStatus.OK)
+    public Flux<Person> getPersonsIterable() {
+        Person p = new Person();
+        p.setId("1L");
+        p.setName("David");
+        p.setLastName("Vaquero");
+        List<Person> listado = new ArrayList<>();
+        listado.add(p);
+        return Flux.fromIterable(listado); // Convierte la lista en un Flux<Person>
     }
 }

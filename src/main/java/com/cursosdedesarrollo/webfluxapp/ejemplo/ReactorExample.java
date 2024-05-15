@@ -53,6 +53,12 @@ public class ReactorExample {
                 error -> System.err.println("Error en transformación 2: " + error),
                 () -> System.out.println("Transformación 2 completada")
         );
+        // versión simplificada
+        Mono
+                .just("Hola")
+                .map(v -> v + " mundo!")
+                .subscribe(System.out::println);
+
 
         // Crear un Flux a partir de una lista
         Flux<Integer> flux = Flux.just(1, 2, 3, 4, 5);
@@ -65,8 +71,7 @@ public class ReactorExample {
                     // Por ejemplo, podrías llamar a un método en esta sección
                     // que realice alguna acción basada en el valor emitido
                 },
-                error -> System.err.println("Error: " + error),
-                () -> System.out.println("Flux completado")
+                error -> System.err.println("Error: " + error)
         );
 
 
@@ -143,7 +148,7 @@ public class ReactorExample {
                 () -> System.out.println("Transformación completada")
         );
         // Operador filter:
-        //
+        System.out.println("Flux: filter");
         //Filtra los elementos emitidos por el Flux según un predicado.
         Flux<Integer> pares = numeros.filter(numero -> numero % 2 == 0);
         pares.subscribe(
@@ -167,6 +172,7 @@ public class ReactorExample {
         Flux<List<Integer>> fluxDeListas = Flux.fromIterable(listaDeListas);
 
         // Utilizar flatMap para convertir cada lista en un Flux de números y luego combinarlos en un solo Flux
+        // list -> Flux.fromIterable(list)
         Flux<Integer> fluxDeNumeros = fluxDeListas.flatMap(Flux::fromIterable);
 
         // Suscribirse al Flux resultante y manejar los números emitidos
@@ -180,6 +186,7 @@ public class ReactorExample {
         //
         // Similar a flatMap, pero garantiza que los elementos de salida se emitan
         // en el mismo orden que los elementos de entrada.
+        System.out.println("Flux: concatMap");
         Flux<String> colores = Flux.just("rojo", "verde", "azul");
         Flux<String> coloresMayusculas = colores.concatMap(color -> Flux.just(color.toUpperCase()));
         coloresMayusculas.subscribe(color -> System.out.println("Color emitido: " + color),
@@ -190,12 +197,14 @@ public class ReactorExample {
         // Operador zipWith:
         //
         //Combina el Flux actual con otro Flux, emitiendo un par de elementos resultantes.
+        System.out.println("Flux: zipWith");
         Flux<Integer> numeros2 = Flux.just(1, 2, 3);
         Flux<String> letras = Flux.just("a", "b", "c");
-        Flux<String> combinados = numeros2.zipWith(letras, (num, letra) -> num + "-" + letra);
-        combinados.subscribe(combi -> System.out.println("Dato emitido: " + combi),
-                error -> System.err.println("Error: " + error),
-                () -> System.out.println("Flux completado")
+        Flux<String> combinados = numeros2.zipWith(
+                letras, // segundo Flux a asociar
+                (num, letra) -> num + "-" + letra); // la arrow function que asocia los dos valores
+        combinados.subscribe(datoCombinado -> System.out.println("Dato emitido: " + datoCombinado),
+                error -> System.err.println("Error: " + error)
         );
         // Operador take:
         //
@@ -239,7 +248,8 @@ public class ReactorExample {
         System.out.println("Hot Publisher sin Subscriber");
         // la clave está en el share que obliga a ir emitiendo datos
         Flux<String> movieTheatre = Flux.fromStream(() -> getMovie())
-                .delayElements(Duration.ofSeconds(2)).share();
+                .delayElements(Duration.ofSeconds(2))
+                .share();
 
         // you start watching the movie
         movieTheatre.subscribe(scene -> System.out.println("You are watching " + scene));

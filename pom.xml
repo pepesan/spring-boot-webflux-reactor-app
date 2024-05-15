@@ -11,6 +11,7 @@
 	<groupId>com.cursosdedesarrollo</groupId>
 	<artifactId>webflux-app</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
+	<packaging>jar</packaging>
 	<name>webflux-app</name>
 	<description>Demo project for Spring Boot Webflux</description>
 	<properties>

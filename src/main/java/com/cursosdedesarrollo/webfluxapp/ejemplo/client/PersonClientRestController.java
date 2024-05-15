@@ -14,7 +14,7 @@ import java.time.Duration;
 @RequestMapping("/api/persons/client")
 public class PersonClientRestController {
     private static final String API_MIME_TYPE = "application/json";
-    private static final String API_BASE_URL = "http://localhost:8081";
+    private static final String API_BASE_URL = "http://localhost:8082";
     private static final String USER_AGENT = "Spring 5 WebClient";
     private final WebClient webClient = WebClient.builder()
             .baseUrl(API_BASE_URL)
