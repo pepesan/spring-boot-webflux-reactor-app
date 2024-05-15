@@ -4,9 +4,11 @@ import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.Persona;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Stream;
 
 public class ReactorExample {
     public static void main(String[] args) throws InterruptedException {
@@ -21,11 +23,11 @@ public class ReactorExample {
         mensaje2.subscribe(System.out::println);
 
         Mono<Persona> mensaje3=Mono.just(new Persona("pepe","perez",20))
-                .delayElement(Duration.ofSeconds(2));
+                .delayElement(Duration.ofSeconds(1));
 
         mensaje.subscribe(System.out::println);
 
-        Thread.sleep(3000);
+        Thread.sleep(2000);
 
         System.out.println("Flux");
         Flux<String> mensaje4=Flux.just("hola" ,"que" ,"tal","estas","tu");
@@ -207,6 +209,72 @@ public class ReactorExample {
         primerosTres.subscribe(combi -> System.out.println("Dato emitido: " + combi),
                 error -> System.err.println("Error: " + error),
                 () -> System.out.println("Flux completado")
+        );
+
+
+        // Uso de multiples subscribers
+        System.out.println("multiples subscribers");
+        Flux<Integer> flux2 = Flux.range(1, 5);
+
+        flux2.subscribe(i -> System.out.println("Subscriber 1: " + i));
+
+        // Esta nueva subscripción recibirá los elementos desde el inicio.
+        flux2.subscribe(i -> System.out.println("Subscriber 2: " + i));
+        // Hot vs Cold Publishers
+        // Ref: https://www.vinsguru.com/reactor-hot-publisher-vs-cold-publisher/
+        // Cold Publisher
+        // Sólo envian datos si hay un subscriptor nuevo
+        // comportamiento por defecto
+        System.out.println("Cold Publisher sin Subscriber");
+        Mono<Integer> enteros = Mono.fromSupplier(() -> getDataToBePublished());
+
+        Thread.sleep(2000);
+        System.out.println("Cold Publisher con Subscriber");
+        Mono.fromSupplier(() -> getDataToBePublished())
+                .subscribe(i -> System.out.println("Observer-1 :: " + i));
+        Thread.sleep(2000);
+        System.out.println("Cold Publisher sólo genera si hay Subscriber");
+        // Hot Publisher
+        // Envían dato aunque no haya un subscriptor
+        System.out.println("Hot Publisher sin Subscriber");
+        // la clave está en el share que obliga a ir emitiendo datos
+        Flux<String> movieTheatre = Flux.fromStream(() -> getMovie())
+                .delayElements(Duration.ofSeconds(2)).share();
+
+        // you start watching the movie
+        movieTheatre.subscribe(scene -> System.out.println("You are watching " + scene));
+        Thread.sleep(5000);
+        // meto otro sub
+        movieTheatre.subscribe(scene -> System.out.println("Vinsguru is watching " + scene));
+        Thread.sleep(2000);
+        System.out.println("Hot Publisher con Subscriber y delay");
+        Flux<Long> hotFlux = Flux.interval(Duration.ofSeconds(1)) // Genera valores cada segundo
+                .publish() // Convierte el flujo en un flujo caliente
+                .autoConnect(); // Conecta el flujo para que comience a emitir
+
+        // Simulación de un suscriptor que se une después de 3 segundos
+        Thread.sleep(3000); // Espera 3 segundos
+        hotFlux.subscribe(i -> System.out.println("Subscriber 1: " + i));
+
+        // Simulación de otro suscriptor que se une después de 5 segundos
+        Thread.sleep(2000); // Espera 2 segundos más
+        hotFlux.subscribe(i -> System.out.println("Subscriber 2: " + i));
+
+        Thread.sleep(5000); // Espera 5 segundos más para ver la emisión continua
+    }
+
+    private static int getDataToBePublished(){
+        System.out.println("getDataToBePublished was called");
+        return 1;
+    }
+    private static Stream<String> getMovie(){
+        System.out.println("Got the movie streaming request");
+        return Stream.of(
+                "scene 1",
+                "scene 2",
+                "scene 3",
+                "scene 4",
+                "scene 5"
         );
     }
 }
