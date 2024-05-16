@@ -11,7 +11,10 @@ public class ParallelFluxExample {
         ParallelFlux<Integer> parallelFlux = Flux.range(1, 10)
                 .parallel()
                 .runOn(Schedulers.parallel()) // Ejecutar en hilos en paralelo
-                .map(i -> i * 2);
+                .map(i -> {
+                    System.out.println(i);
+                    return i * 2;
+                });
 
         // Verificar si todas las tareas en paralelo han sido completadas
         Mono<Boolean> allTasksCompleted = parallelFlux

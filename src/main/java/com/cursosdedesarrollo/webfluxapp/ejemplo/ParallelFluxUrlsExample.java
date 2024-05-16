@@ -25,6 +25,7 @@ public class ParallelFluxUrlsExample {
                 .parallel()
                 .runOn(Schedulers.parallel()) // Ejecutar en hilos en paralelo
                 .map(url -> {
+                    System.out.println("Petición lanzada: " + url);
                     HttpResponse<String> response = makeRequest(url);
                     System.out.println("Respuesta: " + response);
                     System.out.println("Status code: " + response.statusCode());
