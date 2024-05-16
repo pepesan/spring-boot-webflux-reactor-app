@@ -28,6 +28,10 @@ public class PersonSimpleRestController {
     private Integer counter;
 
     public PersonSimpleRestController(){
+        resetData();
+    }
+
+    private void resetData() {
         this.listado = new ArrayList<>();
         Person p = new Person();
         p.setId("1L");
@@ -36,6 +40,7 @@ public class PersonSimpleRestController {
         this.listado.add(p);
         this.counter = 1;
     }
+
     @GetMapping()
     @ResponseStatus(HttpStatus.OK)
     public Flux<Person> getAllTweets() {
@@ -49,6 +54,12 @@ public class PersonSimpleRestController {
         p.setId(this.counter+"L");
         this.listado.add(p);
         return Mono.just(ResponseEntity.ok(p));
+    }
+
+    @GetMapping("/clear")
+    public Mono<String> clearData(){
+        this.resetData();
+        return Mono.just("OK");
     }
 
     @GetMapping("/{id}")
