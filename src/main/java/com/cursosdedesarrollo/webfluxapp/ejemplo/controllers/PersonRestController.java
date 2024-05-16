@@ -18,12 +18,17 @@ import reactor.core.publisher.Mono;
 @RestController
 @RequestMapping("/api/persons")
 public class PersonRestController {
-    @Autowired
+
     private ReactivePersonRepository reactiveMongoRepository;
+
+    @Autowired
+    public PersonRestController(ReactivePersonRepository reactiveMongoRepository){
+        this.reactiveMongoRepository = reactiveMongoRepository;
+    }
 
     @GetMapping()
     @ResponseStatus(HttpStatus.OK)
-    public Flux<Person> getAllTweets() {
+    public Flux<Person> getAllPerson() {
         return reactiveMongoRepository.findAll();
     }
     // método reactivo para el manejo de peticiones y la consulta a la BBDD
