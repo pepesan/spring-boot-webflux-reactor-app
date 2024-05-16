@@ -12,18 +12,10 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@Document(collection = "personas")
-public class Person {
-    @Id
-    private String id;
+public class PersonDTO {
     @NotNull
     @Size(min = 4, max = 20, message = "Debe tener entre 4 y 20 caracteres")
     private String name;
     @NotNull
     private String lastName;
-    public Person(PersonDTO personDTO){
-        this.setId("0L");
-        this.setName(personDTO.getName());
-        this.setLastName(personDTO.getLastName());
-    }
 }
