@@ -24,7 +24,7 @@
 </div>
 </body>
 <script>
-    var sse = new EventSource('http://localhost:8082/temperatures');
+    var sse = new EventSource('http://localhost:8080/temperatures');
     sse.onmessage = function (evt) {
         var el = document.getElementById('messages');
         el.appendChild(document.createTextNode(evt.data));
