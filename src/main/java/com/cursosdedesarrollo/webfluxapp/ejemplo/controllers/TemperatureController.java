@@ -19,7 +19,13 @@ public class TemperatureController {
         Random r = new Random();
         int low = 0;
         int high = 50;
-        return Flux.fromStream(Stream.generate(() -> r.nextInt(high - low) + low)
+        return Flux.fromStream(
+                Stream.generate(
+                        () ->
+                                // Devuelve el dato que tu quieras
+                                // return cosa
+                                r.nextInt(high - low) + low
+                )
                 .map(s -> String.valueOf(s))
                 .peek((msg) -> {
                     logger.info(msg);
