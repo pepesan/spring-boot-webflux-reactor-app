@@ -63,7 +63,8 @@ public class PersonClientRestController {
     }
     // Modificar Objeto por ID
     @PutMapping("/{id}")
-    public Mono<ResponseEntity<Person>> modificaClienteRemoto(@PathVariable(value = "id") String id, @RequestBody Person person){
+    public Mono<ResponseEntity<Person>> modificaClienteRemoto(@PathVariable(value = "id") String id,
+                                                              @RequestBody Person person){
 
         return this.webClient.put()
                 .uri("/api/persons/"+id)
