@@ -1,6 +1,13 @@
 package com.cursosdedesarrollo.webfluxapp.ejemplo.client;
 
 import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.Person;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -10,6 +17,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 
+@Tag(name = "Persons (WebClient proxy)", description = "Proxy reactivo hacia /api/persons usando WebClient. Demuestra el patrón cliente HTTP reactivo entre servicios.")
 @RestController
 @RequestMapping("/api/persons/client")
 public class PersonClientRestController {
@@ -23,7 +31,8 @@ public class PersonClientRestController {
             .build();
 
 
-    // Obtener Listado
+    @Operation(summary = "Listar personas vía WebClient")
+    @ApiResponse(responseCode = "200", description = "Lista de personas obtenida de /api/persons")
     @GetMapping
     public Flux<Person> clienteListado(){
 
@@ -35,7 +44,12 @@ public class PersonClientRestController {
                     return clientResponse.bodyToFlux(Person.class);
                 });
     }
-    // Alta Objeto
+    @Operation(summary = "Crear persona vía WebClient")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Persona creada",
+                content = @Content(schema = @Schema(implementation = Person.class))),
+        @ApiResponse(responseCode = "400", description = "Datos inválidos", content = @Content)
+    })
     @PostMapping
     public Mono<ResponseEntity<Person>> clienteAlta(@RequestBody Person person){
 
@@ -46,9 +60,15 @@ public class PersonClientRestController {
                 .exchangeToMono(response -> response.toEntity(Person.class))
                 .timeout(Duration.ofSeconds(5));
     }
-    // Obtener Objeto por ID
+    @Operation(summary = "Obtener persona por ID vía WebClient")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Persona encontrada",
+                content = @Content(schema = @Schema(implementation = Person.class))),
+        @ApiResponse(responseCode = "404", description = "Persona no encontrada", content = @Content)
+    })
     @GetMapping("/{id}")
-    public Mono<ResponseEntity<Person>> obtenClienteRemoto(@PathVariable(value = "id") String id){
+    public Mono<ResponseEntity<Person>> obtenClienteRemoto(
+            @Parameter(description = "ID MongoDB de la persona") @PathVariable(value = "id") String id){
 
         return this.webClient.get()
                 .uri("/api/persons/"+id)
@@ -61,10 +81,16 @@ public class PersonClientRestController {
                     return person ;
                 });
     }
-    // Modificar Objeto por ID
+    @Operation(summary = "Actualizar persona por ID vía WebClient")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Persona actualizada",
+                content = @Content(schema = @Schema(implementation = Person.class))),
+        @ApiResponse(responseCode = "404", description = "Persona no encontrada", content = @Content)
+    })
     @PutMapping("/{id}")
-    public Mono<ResponseEntity<Person>> modificaClienteRemoto(@PathVariable(value = "id") String id,
-                                                              @RequestBody Person person){
+    public Mono<ResponseEntity<Person>> modificaClienteRemoto(
+            @Parameter(description = "ID MongoDB de la persona") @PathVariable(value = "id") String id,
+            @RequestBody Person person){
 
         return this.webClient.put()
                 .uri("/api/persons/"+id)
@@ -72,9 +98,15 @@ public class PersonClientRestController {
                 .exchangeToMono(response -> response.toEntity(Person.class))
                 .timeout(Duration.ofSeconds(5));
     }
-    // Borrar Objeto por ID
+    @Operation(summary = "Eliminar persona por ID vía WebClient")
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Persona eliminada",
+                content = @Content(schema = @Schema(implementation = Person.class))),
+        @ApiResponse(responseCode = "404", description = "Persona no encontrada", content = @Content)
+    })
     @DeleteMapping("/{id}")
-    public Mono<ResponseEntity<Person>> borrarClienteRemoto(@PathVariable(value = "id") String id){
+    public Mono<ResponseEntity<Person>> borrarClienteRemoto(
+            @Parameter(description = "ID MongoDB de la persona") @PathVariable(value = "id") String id){
 
         return this.webClient.delete()
                 .uri("/api/persons/"+id)
