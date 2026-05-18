@@ -1,5 +1,6 @@
 package com.cursosdedesarrollo.webfluxapp.ejemplo.domain;
 
+import com.cursosdedesarrollo.webfluxapp.ejemplo.dto.PersonDTO;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;

@@ -1,7 +1,7 @@
 package com.cursosdedesarrollo.webfluxapp.ejemplo.controllers;
 
 import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.Person;
-import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.PersonDTO;
+import com.cursosdedesarrollo.webfluxapp.ejemplo.dto.PersonDTO;
 import com.cursosdedesarrollo.webfluxapp.ejemplo.repositories.ReactivePersonRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;

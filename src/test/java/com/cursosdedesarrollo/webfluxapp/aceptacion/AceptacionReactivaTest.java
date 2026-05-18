@@ -1,7 +1,7 @@
 package com.cursosdedesarrollo.webfluxapp.aceptacion;
 
 import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.Person;
-import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.PersonDTO;
+import com.cursosdedesarrollo.webfluxapp.ejemplo.dto.PersonDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;

@@ -6,6 +6,10 @@ Proyecto de ejemplo que demuestra el uso de Spring Boot 4 con programación reac
 
 - **API REST reactiva** con `Mono` y `Flux` (Spring WebFlux + Spring MVC)
 - **MongoDB reactivo** con `ReactiveMongoRepository` y queries derivadas con paginación
+- **Relaciones entre colecciones** — tres ejemplos progresivos:
+  - **1:1** referenciada `flatMap` + `zipWith` (Empleado → Contrato)
+  - **1:N** con `flatMapMany` (Proyecto → Tareas)
+  - **N:M** con colección intermedia, `flatMapMany` encadenado, `zipWith` y `collectList` (Estudiante ↔ Curso vía Matriculacion)
 - **WebClient** como cliente HTTP reactivo entre servicios
 - **Server-Sent Events (SSE)** para streaming de datos en tiempo real
 - **WebSocket** para comunicación bidireccional
@@ -317,6 +321,279 @@ curl -s -X DELETE http://localhost:8080/api/clientes/$CLI | jq
 
 ---
 
+### `/api/relaciones/1a1` — Relación 1:1 referenciada (Empleado → Contrato)
+
+Ejemplo de relación 1:1 entre dos colecciones MongoDB. `Empleado` almacena el campo `contratoId` apuntando al ID del documento en la colección `contratos`. Los tres patrones reactivos clave que ilustra:
+
+| Patrón reactor        | Operación                                              |
+| --------------------- | ------------------------------------------------------ |
+| `flatMap` de lectura  | Resolver el contrato de un empleado (dos queries)      |
+| `flatMap` de escritura| Crear empleado + contrato encadenando las dos escrituras |
+| `zipWith`             | Asignar contrato existente (ambas queries en paralelo) |
+
+#### Crear un contrato
+
+```bash
+CID=$(curl -s -X POST http://localhost:8080/api/relaciones/1a1/contratos \
+  -H "Content-Type: application/json" \
+  -d '{"tipo":"INDEFINIDO","fechaInicio":"2024-01-15","salario":35000.0}' | jq -r '.id')
+echo "Contrato ID: $CID"
+```
+
+#### Crear un empleado sin contrato
+
+```bash
+EID=$(curl -s -X POST http://localhost:8080/api/relaciones/1a1/empleados \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"Ana García","puesto":"Desarrolladora Senior"}' | jq -r '.id')
+echo "Empleado ID: $EID"
+```
+
+#### Asignar el contrato al empleado (`zipWith`)
+
+Recupera ambos documentos en paralelo y actualiza `contratoId` en el empleado:
+
+```bash
+curl -s -X PUT "http://localhost:8080/api/relaciones/1a1/empleados/$EID/contrato/$CID" | jq
+# {
+#   "empleado": { "id": "...", "nombre": "Ana García", "contratoId": "..." },
+#   "contrato": { "id": "...", "tipo": "INDEFINIDO", "salario": 35000.0 }
+# }
+```
+
+#### Obtener empleado con contrato resuelto (`flatMap` de lectura)
+
+Dos queries encadenadas: busca el empleado, luego resuelve el contrato por `contratoId`:
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/1a1/empleados/$EID/completo" | jq
+```
+
+Si el empleado no tiene `contratoId` asignado, el campo `contrato` aparece como `null` (no devuelve 404):
+
+```bash
+EID2=$(curl -s -X POST http://localhost:8080/api/relaciones/1a1/empleados \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"Luis Pérez","puesto":"QA"}' | jq -r '.id')
+
+curl -s "http://localhost:8080/api/relaciones/1a1/empleados/$EID2/completo" | jq
+# { "empleado": { "id": "...", "nombre": "Luis Pérez", "contratoId": null }, "contrato": null }
+```
+
+#### Crear empleado y contrato en una sola llamada (`flatMap` de escritura)
+
+Guarda primero el contrato (obtiene el ID generado), luego guarda el empleado con ese ID ya referenciado:
+
+```bash
+curl -s -X POST http://localhost:8080/api/relaciones/1a1/empleados/con-contrato \
+  -H "Content-Type: application/json" \
+  -d '{
+    "empleado": {"nombre":"Carmen Ruiz","puesto":"Product Manager"},
+    "contrato": {"tipo":"TEMPORAL","fechaInicio":"2024-06-01","fechaFin":"2025-05-31","salario":28000.0}
+  }' | jq
+# {
+#   "empleado": { "id": "...", "nombre": "Carmen Ruiz", "contratoId": "..." },
+#   "contrato": { "id": "...", "tipo": "TEMPORAL", "salario": 28000.0 }
+# }
+```
+
+#### Listar empleados y contratos
+
+```bash
+curl -s http://localhost:8080/api/relaciones/1a1/empleados | jq
+curl -s http://localhost:8080/api/relaciones/1a1/contratos | jq
+```
+
+#### Eliminar empleado o contrato
+
+```bash
+curl -s -X DELETE "http://localhost:8080/api/relaciones/1a1/empleados/$EID" | jq
+curl -s -X DELETE "http://localhost:8080/api/relaciones/1a1/contratos/$CID" | jq
+```
+
+> **Validaciones:** `nombre` y `puesto` en Empleado no pueden estar vacíos. En Contrato: `tipo` no puede estar vacío, `fechaInicio` y `salario` son obligatorios. `fechaFin` es opcional (null para contratos indefinidos).
+
+---
+
+### `/api/relaciones/1an` — Relación 1:N (Proyecto → Tareas)
+
+Ejemplo de relación 1:N entre dos colecciones MongoDB. Cada `Tarea` almacena un `proyectoId` que la vincula a su `Proyecto`. Los patrones reactivos clave:
+
+| Patrón reactor   | Operación                                                        |
+| ---------------- | ---------------------------------------------------------------- |
+| `flatMapMany`    | `Mono<Proyecto>` → `Flux<Tarea>` (todas las tareas del proyecto) |
+| `flatMap` + DTO  | Proyecto + lista de tareas agregada con `collectList()`          |
+
+#### Crear un proyecto
+
+```bash
+PID=$(curl -s -X POST http://localhost:8080/api/relaciones/1an/proyectos \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"Portal de clientes","descripcion":"Migración del portal legacy a React"}' | jq -r '.id')
+echo "Proyecto ID: $PID"
+```
+
+#### Añadir tareas al proyecto
+
+```bash
+TID1=$(curl -s -X POST http://localhost:8080/api/relaciones/1an/tareas \
+  -H "Content-Type: application/json" \
+  -d "{\"titulo\":\"Diseñar pantalla de login\",\"estado\":\"PENDIENTE\",\"proyectoId\":\"$PID\"}" | jq -r '.id')
+
+TID2=$(curl -s -X POST http://localhost:8080/api/relaciones/1an/tareas \
+  -H "Content-Type: application/json" \
+  -d "{\"titulo\":\"Implementar API REST\",\"estado\":\"EN_CURSO\",\"proyectoId\":\"$PID\"}" | jq -r '.id')
+```
+
+#### Obtener tareas de un proyecto (`flatMapMany`)
+
+`Mono<Proyecto>` → `Flux<Tarea>`: busca el proyecto y emite todas sus tareas como stream:
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/1an/proyectos/$PID/tareas" | jq
+# [
+#   { "id": "...", "titulo": "Diseñar pantalla de login", "estado": "PENDIENTE", "proyectoId": "..." },
+#   { "id": "...", "titulo": "Implementar API REST", "estado": "EN_CURSO", "proyectoId": "..." }
+# ]
+```
+
+#### Obtener proyecto con todas sus tareas (DTO enriquecido)
+
+`flatMap` + `collectList()`: resuelve el proyecto y agrega todas las tareas en un único DTO:
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/1an/proyectos/$PID/completo" | jq
+# {
+#   "proyecto": { "id": "...", "nombre": "Portal de clientes" },
+#   "tareas": [ { "titulo": "Diseñar pantalla de login", ... }, ... ]
+# }
+```
+
+#### Actualizar estado de una tarea
+
+```bash
+curl -s -X PUT "http://localhost:8080/api/relaciones/1an/tareas/$TID1/estado?estado=HECHO" | jq
+```
+
+#### Listar proyectos
+
+```bash
+curl -s http://localhost:8080/api/relaciones/1an/proyectos | jq
+```
+
+#### Eliminar tarea o proyecto
+
+```bash
+curl -s -X DELETE "http://localhost:8080/api/relaciones/1an/tareas/$TID1" | jq
+curl -s -X DELETE "http://localhost:8080/api/relaciones/1an/proyectos/$PID" | jq
+```
+
+> **Validaciones:** `nombre` del proyecto no puede estar vacío. En Tarea: `titulo`, `estado` y `proyectoId` son obligatorios. Estado recomendado: `PENDIENTE`, `EN_CURSO` o `HECHO`.
+
+---
+
+### `/api/relaciones/nm` — Relación N:M con colección intermedia (Estudiante ↔ Curso)
+
+Ejemplo de relación N:M. La colección `matriculaciones` actúa de join table y puede almacenar datos propios de la relación (`fechaAlta`, `nota`). Los patrones reactivos clave:
+
+| Patrón reactor                        | Operación                                                             |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| `zipWith` de validación               | Verificar que estudiante y curso existen en paralelo antes de matricular |
+| `flatMapMany` + `flatMap` encadenados | `Mono<Estudiante>` → `Flux<Matriculacion>` → `Flux<Curso>`            |
+| `flatMap` + `zipWith` + `collectList` | DTO enriquecido: matrícula + curso resueltos y agregados en lista     |
+
+#### Crear estudiantes y cursos
+
+```bash
+EID=$(curl -s -X POST http://localhost:8080/api/relaciones/nm/estudiantes \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"Laura Martínez","email":"laura@ejemplo.com"}' | jq -r '.id')
+echo "Estudiante ID: $EID"
+
+CID1=$(curl -s -X POST http://localhost:8080/api/relaciones/nm/cursos \
+  -H "Content-Type: application/json" \
+  -d '{"titulo":"Spring Boot con WebFlux","descripcion":"Programación reactiva con Project Reactor","plazas":30}' | jq -r '.id')
+
+CID2=$(curl -s -X POST http://localhost:8080/api/relaciones/nm/cursos \
+  -H "Content-Type: application/json" \
+  -d '{"titulo":"Docker y Kubernetes","plazas":20}' | jq -r '.id')
+```
+
+#### Matricular un estudiante en un curso (`zipWith` de validación)
+
+Verifica en paralelo que estudiante y curso existen antes de guardar la matrícula:
+
+```bash
+curl -s -X POST http://localhost:8080/api/relaciones/nm/matriculaciones \
+  -H "Content-Type: application/json" \
+  -d "{\"estudianteId\":\"$EID\",\"cursoId\":\"$CID1\"}" | jq
+# { "id": "...", "estudianteId": "...", "cursoId": "...", "fechaAlta": "2024-09-01", "nota": null }
+
+curl -s -X POST http://localhost:8080/api/relaciones/nm/matriculaciones \
+  -H "Content-Type: application/json" \
+  -d "{\"estudianteId\":\"$EID\",\"cursoId\":\"$CID2\"}" | jq
+```
+
+#### Obtener cursos de un estudiante (`flatMapMany` + `flatMap`)
+
+Dos niveles de encadenamiento: `Mono<Estudiante>` → `Flux<Matriculacion>` → `Flux<Curso>`:
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/nm/estudiantes/$EID/cursos" | jq
+# [
+#   { "id": "...", "titulo": "Spring Boot con WebFlux", "plazas": 30 },
+#   { "id": "...", "titulo": "Docker y Kubernetes", "plazas": 20 }
+# ]
+```
+
+#### Obtener estudiante con todas sus matrículas resueltas (`flatMap` + `zipWith` + `collectList`)
+
+Para cada matrícula combina el curso completo usando `zipWith` y agrega el resultado con `collectList`:
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/nm/estudiantes/$EID/completo" | jq
+# {
+#   "estudiante": { "id": "...", "nombre": "Laura Martínez", "email": "laura@ejemplo.com" },
+#   "matriculas": [
+#     {
+#       "matriculacion": { "id": "...", "fechaAlta": "2024-09-01", "nota": null },
+#       "curso": { "titulo": "Spring Boot con WebFlux", "plazas": 30 }
+#     },
+#     ...
+#   ]
+# }
+```
+
+#### Obtener estudiantes de un curso (patrón simétrico)
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/nm/cursos/$CID1/estudiantes" | jq
+```
+
+#### Actualizar la nota de una matrícula
+
+```bash
+curl -s -X PUT "http://localhost:8080/api/relaciones/nm/matriculaciones/$EID/$CID1/nota?nota=8.5" | jq
+# { "id": "...", "estudianteId": "...", "cursoId": "...", "fechaAlta": "...", "nota": 8.5 }
+```
+
+#### Desmatricular un estudiante
+
+```bash
+curl -s -X DELETE "http://localhost:8080/api/relaciones/nm/matriculaciones/$EID/$CID2" | jq
+```
+
+#### Listar estudiantes y cursos
+
+```bash
+curl -s http://localhost:8080/api/relaciones/nm/estudiantes | jq
+curl -s http://localhost:8080/api/relaciones/nm/cursos | jq
+```
+
+> **Validaciones:** `nombre` y `email` del estudiante son obligatorios (`email` debe tener formato válido). En Curso: `titulo` y `plazas` son obligatorios, `plazas` debe ser ≥ 1. En la petición de matrícula: `estudianteId` y `cursoId` no pueden estar vacíos. Si el estudiante ya está matriculado en el curso, devuelve `409 Conflict`.
+
+---
+
 ### `/temperatures` — Streaming de temperaturas (SSE)
 
 Genera un stream infinito de temperaturas aleatorias (0–49 °C) cada segundo. No requiere datos en base de datos.
@@ -406,19 +683,37 @@ El proyecto tiene tres niveles de tests:
 mvn test
 ```
 
-| Clase                            | Tipo                                | Tests  |
-| -------------------------------- | ----------------------------------- | ------ |
-| `PersonTest`                     | Unitario — dominio                  | 14     |
-| `PersonDTOTest`                  | Unitario — dominio                  | 13     |
-| `PersonaTest`                    | Unitario — dominio                  | 5      |
-| `MainControllerTest`             | Unitario — controller               | 3      |
-| `PersonSimpleRestControllerTest` | Unitario — controller               | 9      |
-| `PersonRestControllerTest`       | Unitario — controller               | 10     |
-| `PersonServiceTest`              | Unitario — servicio                 | 7      |
-| `TemperatureControllerTest`      | Unitario — controller               | 2      |
-| `AceptacionTest`                 | Aceptación (servidor completo)      | 5      |
-| `AceptacionReactivaTest`         | Aceptación reactiva (WebTestClient) | 5      |
-| **Total**                        |                                     | **73** |
+| Clase                            | Tipo                                | Tests |
+| -------------------------------- | ----------------------------------- | ----- |
+| `PersonTest`                     | Unitario — dominio                  | 14    |
+| `PersonDTOTest`                  | Unitario — dto                      | 13    |
+| `PersonaTest`                    | Unitario — dominio                  | 5     |
+| `EmpleadoTest`                   | Unitario — dominio 1:1              | 9     |
+| `ContratoTest`                   | Unitario — dominio 1:1              | 10    |
+| `ProyectoTest`                   | Unitario — dominio 1:N              | 8     |
+| `TareaTest`                      | Unitario — dominio 1:N              | 9     |
+| `EstudianteTest`                 | Unitario — dominio N:M              | 9     |
+| `CursoTest`                      | Unitario — dominio N:M              | 10    |
+| `MatriculacionTest`              | Unitario — dominio N:M              | 10    |
+| `MainControllerTest`             | Unitario — controller               | 3     |
+| `PersonSimpleRestControllerTest` | Unitario — controller               | 9     |
+| `PersonRestControllerTest`       | Unitario — controller               | 11    |
+| `TemperatureControllerTest`      | Unitario — controller               | 2     |
+| `EmpleadoControllerTest`         | Unitario — controller 1:1           | 13    |
+| `ProyectoControllerTest`         | Unitario — controller 1:N           | 12    |
+| `EstudianteControllerTest`       | Unitario — controller N:M           | 17    |
+| `ClienteControllerTest`          | Unitario — controller               | 8     |
+| `PersonServiceTest`              | Unitario — servicio                 | 7     |
+| `EmpleadoServiceTest`            | Unitario — servicio 1:1             | 8     |
+| `ProyectoServiceTest`            | Unitario — servicio 1:N             | 13    |
+| `MatriculacionServiceTest`       | Unitario — servicio N:M             | 20    |
+| `WebSocketHandlerTest`           | Unitario — websocket                | 3     |
+| `GlobalExceptionHandlerTest`     | Unitario — manejo de errores        | 8     |
+| `ClienteTest`                    | Unitario — dominio ejercicios       | 9     |
+| `StringFluxCreatorTest`          | Unitario — reactor                  | 1     |
+| `AceptacionTest`                 | Aceptación (servidor completo)      | 5     |
+| `AceptacionReactivaTest`         | Aceptación reactiva (WebTestClient) | 5     |
+| **Total**                        |                                     | **251** |
 
 ### Tests de integración (requieren Docker)
 
@@ -441,27 +736,72 @@ src/main/java/com/cursosdedesarrollo/webfluxapp/
 ├── WebfluxAppApplication.java
 ├── ejemplo/
 │   ├── client/
-│   │   └── PersonClientRestController.java   # Proxy WebClient → /api/persons
+│   │   └── PersonClientRestController.java      # Proxy WebClient → /api/persons
 │   ├── controllers/
-│   │   ├── MainController.java               # Ejemplos básicos Mono/Flux
-│   │   ├── PersonRestController.java         # CRUD MongoDB reactivo
-│   │   ├── PersonSimpleRestController.java   # CRUD en memoria
-│   │   └── TemperatureController.java        # SSE de temperaturas
+│   │   ├── MainController.java                  # Ejemplos básicos Mono/Flux
+│   │   ├── PersonRestController.java            # CRUD MongoDB reactivo
+│   │   ├── PersonSimpleRestController.java      # CRUD en memoria
+│   │   ├── TemperatureController.java           # SSE de temperaturas
+│   │   ├── unoauno/
+│   │   │   └── EmpleadoController.java          # 1:1 Empleados / Contratos
+│   │   ├── unoaene/
+│   │   │   └── ProyectoController.java          # 1:N Proyectos / Tareas
+│   │   └── naem/
+│   │       └── EstudianteController.java        # N:M Estudiantes / Cursos / Matriculaciones
 │   ├── domain/
-│   │   ├── Person.java                       # Entidad MongoDB
-│   │   ├── PersonDTO.java                    # DTO de entrada
-│   │   └── Persona.java                      # Ejemplo de dominio simple
+│   │   ├── Person.java                          # Entidad MongoDB
+│   │   ├── Persona.java                         # Ejemplo de dominio simple
+│   │   ├── unoauno/
+│   │   │   ├── Empleado.java
+│   │   │   └── Contrato.java
+│   │   ├── unoaene/
+│   │   │   ├── Proyecto.java
+│   │   │   └── Tarea.java
+│   │   └── naem/
+│   │       ├── Estudiante.java
+│   │       ├── Curso.java
+│   │       └── Matriculacion.java               # Colección intermedia N:M
+│   ├── dto/
+│   │   ├── PersonDTO.java
+│   │   ├── unoauno/
+│   │   │   ├── EmpleadoConContratoDTO.java
+│   │   │   └── CrearEmpleadoConContratoRequest.java
+│   │   ├── unoaene/
+│   │   │   └── ProyectoConTareasDTO.java
+│   │   └── naem/
+│   │       ├── MatriculacionConCursoDTO.java    # Matrícula + curso resuelto
+│   │       ├── EstudianteConMatriculasDTO.java  # Estudiante + lista de matrículas resueltas
+│   │       └── MatricularRequest.java
 │   ├── repositories/
-│   │   └── ReactivePersonRepository.java     # ReactiveMongoRepository
+│   │   ├── ReactivePersonRepository.java
+│   │   ├── unoauno/
+│   │   │   ├── EmpleadoRepository.java
+│   │   │   └── ContratoRepository.java
+│   │   ├── unoaene/
+│   │   │   ├── ProyectoRepository.java
+│   │   │   └── TareaRepository.java
+│   │   └── naem/
+│   │       ├── EstudianteRepository.java
+│   │       ├── CursoRepository.java
+│   │       └── MatriculacionRepository.java
 │   ├── services/
-│   │   └── PersonService.java                # Functional endpoints handler
+│   │   ├── PersonService.java
+│   │   ├── unoauno/
+│   │   │   └── EmpleadoService.java             # flatMap + zipWith (1:1)
+│   │   ├── unoaene/
+│   │   │   └── ProyectoService.java             # flatMapMany (1:N)
+│   │   └── naem/
+│   │       └── MatriculacionService.java        # flatMapMany + zipWith + collectList (N:M)
 │   └── websocket/
 │       ├── WebSocketConfiguration.java
 │       └── WebSocketHandler.java
-└── ejercicios/
-    ├── Cliente.java
-    ├── ClienteController.java                # CRUD MongoDB reactivo
-    └── ClienteRepository.java
+├── ejercicios/
+│   ├── Cliente.java
+│   ├── ClienteController.java
+│   └── ClienteRepository.java
+└── exception/
+    ├── ErrorResponse.java
+    └── GlobalExceptionHandler.java              # @RestControllerAdvice centralizado
 ```
 
 ---

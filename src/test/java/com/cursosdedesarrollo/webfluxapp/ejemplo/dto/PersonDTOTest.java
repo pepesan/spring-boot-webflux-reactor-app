@@ -1,4 +1,4 @@
-package com.cursosdedesarrollo.webfluxapp.ejemplo.domain;
+package com.cursosdedesarrollo.webfluxapp.ejemplo.dto;
 
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;

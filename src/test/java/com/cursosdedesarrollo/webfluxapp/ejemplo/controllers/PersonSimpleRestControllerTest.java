@@ -1,7 +1,7 @@
 package com.cursosdedesarrollo.webfluxapp.ejemplo.controllers;
 
 import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.Person;
-import com.cursosdedesarrollo.webfluxapp.ejemplo.domain.PersonDTO;
+import com.cursosdedesarrollo.webfluxapp.ejemplo.dto.PersonDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
