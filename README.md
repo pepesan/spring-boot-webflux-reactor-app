@@ -645,20 +645,6 @@ wscat -c ws://localhost:8080/socket
 # > action
 # < action
 ```
-
-#### Desde la CLI con `websocat`
-
-```bash
-# websocat: https://github.com/vi/websocat
-# Ubuntu/Debian: apt install websocat
-
-websocat ws://localhost:8080/socket
-# hola mundo     ← escribe y pulsa Enter
-# hola mundo     ← eco del servidor
-```
-
-> El handler también devuelve mensajes binarios intactos — útil para enviar imágenes o cualquier payload binario.
-
 ---
 
 ### Actuator
