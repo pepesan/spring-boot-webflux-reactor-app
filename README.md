@@ -11,6 +11,8 @@ Proyecto de ejemplo que demuestra el uso de Spring Boot 4 con programación reac
   - **1:N** con `flatMapMany` (Proyecto → Tareas)
   - **N:M** con colección intermedia, `flatMapMany` encadenado, `zipWith` y `collectList` (Estudiante ↔ Curso vía Matriculacion)
   - **Embedding** subdocumentos embebidos, `map` síncrono para cálculos, `flatMap` de escritura, query sobre campo embebido (Pedido ↔ LineaPedido)
+- **Change Stream + SSE** — MongoDB emite cambios en tiempo real como `Flux` infinito; el controller los reenvía como Server-Sent Events sin polling (requiere Replica Set)
+- **Aggregation Pipeline** — `ReactiveMongoTemplate.aggregate()` con `$group`, `$project`, `$sort`, `$limit` para estadísticas y rankings directamente en MongoDB
 - **WebClient** como cliente HTTP reactivo entre servicios
 - **Server-Sent Events (SSE)** para streaming de datos en tiempo real
 - **WebSocket** para comunicación bidireccional
@@ -712,6 +714,151 @@ curl -s -X DELETE "http://localhost:8080/api/relaciones/embebido/pedidos/$PID" |
 
 ---
 
+### `/api/changestream` — Change Stream + SSE (Notificaciones en tiempo real)
+
+Ejemplo de **MongoDB Change Stream** combinado con **Server-Sent Events**. Cada vez que se crea o modifica un documento en la colección `notificaciones`, MongoDB emite un evento que el servidor reenvía al cliente como SSE sin necesidad de polling.
+
+> **Requisito:** MongoDB con **Replica Set** o Sharded Cluster. El Change Stream no está disponible en una instancia standalone. Para activarlo en local ver la nota al final de la sección.
+
+| Patrón                  | Descripción                                                          |
+| ----------------------- | -------------------------------------------------------------------- |
+| `changeStream()`        | `ReactiveMongoTemplate` devuelve un `Flux<ChangeStreamEvent<T>>` infinito |
+| `mapNotNull(getBody())` | Extrae el documento del evento y filtra eventos sin cuerpo (invalidate, etc.) |
+| `TEXT_EVENT_STREAM`     | El controller reenvía el `Flux<Notificacion>` como SSE               |
+
+#### Abrir el stream en un terminal (queda escuchando)
+
+```bash
+curl -s -N -H "Accept: text/event-stream" http://localhost:8080/api/changestream/notificaciones/stream
+# (queda bloqueado esperando eventos)
+```
+
+#### Crear notificaciones desde otro terminal (el primero las recibe al instante)
+
+```bash
+curl -s -X POST http://localhost:8080/api/changestream/notificaciones \
+  -H "Content-Type: application/json" \
+  -d '{"titulo":"Sistema actualizado","mensaje":"Versión 2.0 disponible","tipo":"INFO","fecha":"2024-01-15T10:30:00"}' | jq
+
+curl -s -X POST http://localhost:8080/api/changestream/notificaciones \
+  -H "Content-Type: application/json" \
+  -d '{"titulo":"Disco casi lleno","mensaje":"Quedan menos de 5 GB libres","tipo":"ALERTA","fecha":"2024-01-15T11:00:00"}' | jq
+
+curl -s -X POST http://localhost:8080/api/changestream/notificaciones \
+  -H "Content-Type: application/json" \
+  -d '{"titulo":"Base de datos caída","mensaje":"No se puede conectar al servidor principal","tipo":"ERROR","fecha":"2024-01-15T11:15:00"}' | jq
+```
+
+El primer terminal mostrará cada notificación en el momento en que se inserte:
+
+```
+data:{"id":"...","titulo":"Sistema actualizado","tipo":"INFO","fecha":"2024-01-15T10:30:00"}
+
+data:{"id":"...","titulo":"Disco casi lleno","tipo":"ALERTA","fecha":"2024-01-15T11:00:00"}
+
+data:{"id":"...","titulo":"Base de datos caída","tipo":"ERROR","fecha":"2024-01-15T11:15:00"}
+```
+
+#### Listar todas las notificaciones almacenadas
+
+```bash
+curl -s http://localhost:8080/api/changestream/notificaciones | jq
+```
+
+#### Activar Replica Set en el MongoDB del proyecto
+
+El `docker-compose` del directorio `docker/` arranca MongoDB en modo standalone. Para habilitar Change Streams ejecuta estos comandos una sola vez:
+
+```bash
+# Conectar al shell de MongoDB
+cd docker && ./04_connect.sh
+
+# Dentro del shell de MongoDB
+rs.initiate()
+# Esperar hasta que el prompt cambie a: rs0 [direct: primary]>
+exit
+```
+
+A partir de ese momento el Change Stream funciona sin reiniciar la aplicación.
+
+> **Validaciones:** `titulo`, `mensaje`, `tipo` y `fecha` son obligatorios y no pueden estar en blanco.
+
+---
+
+### `/api/agregacion` — Aggregation Pipeline (Ventas)
+
+Ejemplo de **MongoDB Aggregation Pipeline** con `ReactiveMongoTemplate.aggregate()`. En lugar de queries derivadas sobre documentos individuales, el pipeline procesa toda la colección en el servidor MongoDB y devuelve resultados calculados.
+
+| Etapa del pipeline | Operación                                                       |
+| ------------------ | --------------------------------------------------------------- |
+| `$group`           | Agrupa documentos por campo y aplica acumuladores               |
+| `$sum` / `$avg`    | Acumuladores para sumar e calcular media sobre el grupo         |
+| `$count`           | Cuenta los documentos de cada grupo                             |
+| `$project`         | Renombra `_id` a `categoria`/`producto` y excluye campos extra  |
+| `$sort`            | Ordena los grupos resultantes                                   |
+| `$limit`           | Limita el número de resultados (para rankings top-N)            |
+
+#### Insertar ventas de ejemplo
+
+```bash
+for producto_cat_precio in \
+  "Portátil gaming:ELECTRONICA:1299.99" \
+  "Monitor 4K:ELECTRONICA:599.99" \
+  "Teclado mecánico:ELECTRONICA:89.99" \
+  "Portátil gaming:ELECTRONICA:1299.99" \
+  "Zapatillas running:DEPORTE:129.99" \
+  "Camiseta técnica:DEPORTE:39.99" \
+  "Zapatillas running:DEPORTE:129.99" \
+  "Sofá 3 plazas:HOGAR:899.99" \
+  "Lámpara LED:HOGAR:49.99"; do
+  IFS=':' read -r producto categoria importe <<< "$producto_cat_precio"
+  curl -s -X POST http://localhost:8080/api/agregacion/ventas \
+    -H "Content-Type: application/json" \
+    -d "{\"producto\":\"$producto\",\"categoria\":\"$categoria\",\"importe\":$importe,\"fecha\":\"2024-01-15\"}" > /dev/null
+done
+echo "Ventas insertadas"
+```
+
+#### Resumen estadístico por categoría (`$group` + `$project` + `$sort`)
+
+Calcula para cada categoría: suma total, media y número de ventas. Resultado ordenado de mayor a menor importe:
+
+```bash
+curl -s http://localhost:8080/api/agregacion/ventas/resumen | jq
+# [
+#   { "categoria": "ELECTRONICA", "totalVentas": 3289.96, "mediaImporte": 822.49, "numVentas": 4 },
+#   { "categoria": "HOGAR",       "totalVentas": 949.98,  "mediaImporte": 474.99, "numVentas": 2 },
+#   { "categoria": "DEPORTE",     "totalVentas": 299.97,  "mediaImporte": 99.99,  "numVentas": 3 }
+# ]
+```
+
+#### Ranking top-N de productos por importe total (`$group` + `$sort` + `$limit`)
+
+Agrupa por producto, acumula el importe total y devuelve los primeros N:
+
+```bash
+# Top 3 por defecto
+curl -s "http://localhost:8080/api/agregacion/ventas/top?limite=3" | jq
+# [
+#   { "producto": "Portátil gaming", "totalImporte": 2599.98 },
+#   { "producto": "Sofá 3 plazas",   "totalImporte": 899.99  },
+#   { "producto": "Monitor 4K",      "totalImporte": 599.99  }
+# ]
+
+# Top 5 (valor por defecto si se omite el parámetro)
+curl -s "http://localhost:8080/api/agregacion/ventas/top" | jq
+```
+
+#### Listar todas las ventas
+
+```bash
+curl -s http://localhost:8080/api/agregacion/ventas | jq
+```
+
+> **Validaciones:** `producto`, `categoria`, `importe` y `fecha` son obligatorios. `importe` no puede ser nulo.
+
+---
+
 ### `/temperatures` — Streaming de temperaturas (SSE)
 
 Genera un stream infinito de temperaturas aleatorias (0–49 °C) cada segundo. No requiere datos en base de datos.
@@ -815,13 +962,19 @@ mvn test
 | `PedidoTest`                     | Unitario — dominio embebido         | 10    |
 | `PedidoServiceTest`              | Unitario — servicio embebido        | 15    |
 | `PedidoControllerTest`           | Unitario — controller embebido      | 14    |
+| `NotificacionTest`               | Unitario — dominio change stream    | 10    |
+| `NotificacionServiceTest`        | Unitario — servicio change stream   | 5     |
+| `NotificacionControllerTest`     | Unitario — controller change stream | 6     |
+| `VentaTest`                      | Unitario — dominio aggregation      | 10    |
+| `VentaServiceTest`               | Unitario — servicio aggregation     | 6     |
+| `VentaControllerTest`            | Unitario — controller aggregation   | 8     |
 | `WebSocketHandlerTest`           | Unitario — websocket                | 3     |
 | `GlobalExceptionHandlerTest`     | Unitario — manejo de errores        | 8     |
 | `ClienteTest`                    | Unitario — dominio ejercicios       | 9     |
 | `StringFluxCreatorTest`          | Unitario — reactor                  | 1     |
 | `AceptacionTest`                 | Aceptación (servidor completo)      | 5     |
 | `AceptacionReactivaTest`         | Aceptación reactiva (WebTestClient) | 5     |
-| **Total**                        |                                     | **299** |
+| **Total**                        |                                     | **344** |
 
 ### Tests de integración (requieren Docker)
 
