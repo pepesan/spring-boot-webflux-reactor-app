@@ -1,0 +1,12 @@
+services:
+  mongo:
+    image: mongo:latest
+    container_name: mongo
+    restart: always
+    ports:
+      - 27017:27017
+    volumes:
+      - ./config/mongod.conf.replica:/etc/mongod.conf:ro
+      - ./logs:/var/log/mongodb
+      - ./data:/data/db
+    command: [ "mongod", "--config", "/etc/mongod.conf" ]

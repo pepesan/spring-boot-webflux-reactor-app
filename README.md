@@ -718,7 +718,35 @@ curl -s -X DELETE "http://localhost:8080/api/relaciones/embebido/pedidos/$PID" |
 
 Ejemplo de **MongoDB Change Stream** combinado con **Server-Sent Events**. Cada vez que se crea o modifica un documento en la colección `notificaciones`, MongoDB emite un evento que el servidor reenvía al cliente como SSE sin necesidad de polling.
 
-> **Requisito:** MongoDB con **Replica Set** o Sharded Cluster. El Change Stream no está disponible en una instancia standalone. Para activarlo en local ver la nota al final de la sección.
+> **Requisito previo — Replica Set:** El Change Stream no funciona en MongoDB standalone. El `compose.yaml` del directorio `docker/` arranca MongoDB en modo standalone; usa los scripts numerados para hacer la transición antes de probar este ejemplo.
+
+#### Activar Replica Set (ejecutar desde `docker/` una sola vez)
+
+| Script | Acción |
+| ------ | ------ |
+| `21_stop_mongo.sh` | Para y elimina el contenedor standalone |
+| `22_start_replica.sh` | Arranca mongo con `compose.replica.yaml` (Replica Set `rs0`) |
+| `23_init_replicaset.sh` | Inicializa el Replica Set con `rs.initiate()` |
+| `24_test_replicaset.sh` | Inserta una notificación de prueba para verificar el Change Stream |
+| `25_restore_standalone.sh` | Vuelve al contenedor standalone original |
+
+```bash
+cd docker
+./21_stop_mongo.sh
+./22_start_replica.sh
+./23_init_replicaset.sh
+```
+
+Para volver a standalone:
+
+```bash
+cd docker
+./25_restore_standalone.sh
+```
+
+> Una vez inicializado el Replica Set la aplicación Spring Boot no necesita reiniciarse: el driver MongoDB reactivo detecta la topología automáticamente.
+
+---
 
 | Patrón                  | Descripción                                                          |
 | ----------------------- | -------------------------------------------------------------------- |
@@ -764,22 +792,6 @@ data:{"id":"...","titulo":"Base de datos caída","tipo":"ERROR","fecha":"2024-01
 ```bash
 curl -s http://localhost:8080/api/changestream/notificaciones | jq
 ```
-
-#### Activar Replica Set en el MongoDB del proyecto
-
-El `docker-compose` del directorio `docker/` arranca MongoDB en modo standalone. Para habilitar Change Streams ejecuta estos comandos una sola vez:
-
-```bash
-# Conectar al shell de MongoDB
-cd docker && ./04_connect.sh
-
-# Dentro del shell de MongoDB
-rs.initiate()
-# Esperar hasta que el prompt cambie a: rs0 [direct: primary]>
-exit
-```
-
-A partir de ese momento el Change Stream funciona sin reiniciar la aplicación.
 
 > **Validaciones:** `titulo`, `mensaje`, `tipo` y `fecha` son obligatorios y no pueden estar en blanco.
 
@@ -1083,10 +1095,15 @@ src/main/java/com/cursosdedesarrollo/webfluxapp/
 El directorio `docker/` contiene scripts para gestionar el servidor MongoDB:
 
 ```bash
-docker/01_launch.sh         # Levantar MongoDB
-docker/02_check_ps.sh       # Ver contenedores activos
-docker/03_check_logs.sh     # Ver logs de MongoDB
-docker/04_connect.sh        # Conectar al shell de MongoDB
-docker/05_stop.sh           # Parar MongoDB
-docker/30_destroy.sh        # Eliminar contenedor y datos
+docker/01_launch.sh              # Levantar MongoDB (standalone)
+docker/02_check_ps.sh            # Ver contenedores activos
+docker/03_check_logs.sh          # Ver logs de MongoDB
+docker/04_connect.sh             # Conectar al shell de MongoDB
+docker/05_stop.sh                # Parar MongoDB
+docker/21_stop_mongo.sh          # Para y elimina el contenedor (previo a replica set)
+docker/22_start_replica.sh       # Arranca MongoDB con Replica Set (compose.replica.yaml)
+docker/23_init_replicaset.sh     # Inicializa el Replica Set (rs.initiate)
+docker/24_test_replicaset.sh     # Inserta una notificación de prueba para verificar el Change Stream
+docker/25_restore_standalone.sh  # Restaura MongoDB a modo standalone
+docker/30_destroy.sh             # Eliminar contenedor y datos
 ```
