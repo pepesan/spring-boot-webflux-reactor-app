@@ -6,10 +6,11 @@ Proyecto de ejemplo que demuestra el uso de Spring Boot 4 con programación reac
 
 - **API REST reactiva** con `Mono` y `Flux` (Spring WebFlux + Spring MVC)
 - **MongoDB reactivo** con `ReactiveMongoRepository` y queries derivadas con paginación
-- **Relaciones entre colecciones** — tres ejemplos progresivos:
+- **Relaciones entre colecciones** — cuatro ejemplos progresivos:
   - **1:1** referenciada `flatMap` + `zipWith` (Empleado → Contrato)
   - **1:N** con `flatMapMany` (Proyecto → Tareas)
   - **N:M** con colección intermedia, `flatMapMany` encadenado, `zipWith` y `collectList` (Estudiante ↔ Curso vía Matriculacion)
+  - **Embedding** subdocumentos embebidos, `map` síncrono para cálculos, `flatMap` de escritura, query sobre campo embebido (Pedido ↔ LineaPedido)
 - **WebClient** como cliente HTTP reactivo entre servicios
 - **Server-Sent Events (SSE)** para streaming de datos en tiempo real
 - **WebSocket** para comunicación bidireccional
@@ -594,6 +595,123 @@ curl -s http://localhost:8080/api/relaciones/nm/cursos | jq
 
 ---
 
+### `/api/relaciones/embebido` — Embedding (Pedido con líneas embebidas)
+
+Ejemplo de **embedding** en MongoDB: las `LineaPedido` se almacenan como subdocumentos directamente dentro del documento `Pedido`, sin colección separada. Un único `find` carga el pedido completo con todas sus líneas. Los patrones reactivos clave:
+
+| Patrón reactor        | Operación                                                                        |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `map` síncrono        | Calcular el total sobre líneas ya cargadas (sin I/O adicional)                   |
+| `flatMap` de escritura| Añadir línea al array embebido y persistir el documento completo con un `save()` |
+| Query sobre embebido  | `findByLineasProducto` — MongoDB filtra por campo de subdocumento                |
+
+#### Crear un pedido (con líneas opcionales)
+
+```bash
+PID=$(curl -s -X POST http://localhost:8080/api/relaciones/embebido/pedidos \
+  -H "Content-Type: application/json" \
+  -d '{"cliente":"David Vaquero","fecha":"2024-01-15","estado":"PENDIENTE"}' | jq -r '.id')
+echo "Pedido ID: $PID"
+```
+
+También se puede crear el pedido con líneas ya incluidas:
+
+```bash
+PID2=$(curl -s -X POST http://localhost:8080/api/relaciones/embebido/pedidos \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cliente": "Ana García",
+    "fecha": "2024-03-10",
+    "estado": "PENDIENTE",
+    "lineas": [
+      {"producto": "Teclado mecánico", "cantidad": 2, "precioUnitario": 89.99},
+      {"producto": "Ratón inalámbrico", "cantidad": 1, "precioUnitario": 29.99}
+    ]
+  }' | jq -r '.id')
+```
+
+#### Añadir una línea a un pedido existente (`flatMap` de escritura)
+
+Busca el pedido, añade la línea al array embebido y persiste el documento completo en un único `save()`:
+
+```bash
+curl -s -X POST "http://localhost:8080/api/relaciones/embebido/pedidos/$PID/lineas" \
+  -H "Content-Type: application/json" \
+  -d '{"producto":"Teclado mecánico","cantidad":2,"precioUnitario":89.99}' | jq
+
+curl -s -X POST "http://localhost:8080/api/relaciones/embebido/pedidos/$PID/lineas" \
+  -H "Content-Type: application/json" \
+  -d '{"producto":"Ratón inalámbrico","cantidad":1,"precioUnitario":29.99}' | jq
+# {
+#   "id": "...",
+#   "cliente": "David Vaquero",
+#   "estado": "PENDIENTE",
+#   "lineas": [
+#     {"producto": "Teclado mecánico", "cantidad": 2, "precioUnitario": 89.99},
+#     {"producto": "Ratón inalámbrico", "cantidad": 1, "precioUnitario": 29.99}
+#   ]
+# }
+```
+
+#### Obtener pedido con importe total calculado (`map` síncrono)
+
+Como las líneas están embebidas, el total se calcula con `map` sobre el documento ya cargado — sin segunda query:
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/embebido/pedidos/$PID/total" | jq
+# {
+#   "pedido": { "id": "...", "cliente": "David Vaquero", "lineas": [...] },
+#   "total": 209.97
+# }
+```
+
+#### Filtrar pedidos por estado
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/embebido/pedidos/porEstado/PENDIENTE" | jq
+```
+
+#### Buscar pedidos por producto en líneas embebidas (query sobre subdocumento)
+
+MongoDB evalúa el filtro directamente sobre el array embebido `lineas.producto` sin JOIN ni colección secundaria:
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/embebido/pedidos/porProducto/Teclado%20mec%C3%A1nico" | jq
+# [
+#   { "id": "...", "cliente": "David Vaquero", "lineas": [{ "producto": "Teclado mecánico", ... }] },
+#   ...
+# ]
+```
+
+#### Actualizar el estado de un pedido
+
+```bash
+curl -s -X PUT "http://localhost:8080/api/relaciones/embebido/pedidos/$PID/estado?estado=ENVIADO" | jq
+# { "id": "...", "cliente": "David Vaquero", "estado": "ENVIADO", ... }
+```
+
+#### Listar todos los pedidos
+
+```bash
+curl -s http://localhost:8080/api/relaciones/embebido/pedidos | jq
+```
+
+#### Obtener pedido por ID
+
+```bash
+curl -s "http://localhost:8080/api/relaciones/embebido/pedidos/$PID" | jq
+```
+
+#### Eliminar un pedido
+
+```bash
+curl -s -X DELETE "http://localhost:8080/api/relaciones/embebido/pedidos/$PID" | jq
+```
+
+> **Validaciones:** `cliente`, `fecha` y `estado` del pedido son obligatorios. En `LineaPedido`: `producto` no puede estar en blanco, `cantidad` debe ser ≥ 1 y `precioUnitario` es obligatorio.
+
+---
+
 ### `/temperatures` — Streaming de temperaturas (SSE)
 
 Genera un stream infinito de temperaturas aleatorias (0–49 °C) cada segundo. No requiere datos en base de datos.
@@ -693,13 +811,17 @@ mvn test
 | `EmpleadoServiceTest`            | Unitario — servicio 1:1             | 8     |
 | `ProyectoServiceTest`            | Unitario — servicio 1:N             | 13    |
 | `MatriculacionServiceTest`       | Unitario — servicio N:M             | 20    |
+| `LineaPedidoTest`                | Unitario — dominio embebido         | 9     |
+| `PedidoTest`                     | Unitario — dominio embebido         | 10    |
+| `PedidoServiceTest`              | Unitario — servicio embebido        | 15    |
+| `PedidoControllerTest`           | Unitario — controller embebido      | 14    |
 | `WebSocketHandlerTest`           | Unitario — websocket                | 3     |
 | `GlobalExceptionHandlerTest`     | Unitario — manejo de errores        | 8     |
 | `ClienteTest`                    | Unitario — dominio ejercicios       | 9     |
 | `StringFluxCreatorTest`          | Unitario — reactor                  | 1     |
 | `AceptacionTest`                 | Aceptación (servidor completo)      | 5     |
 | `AceptacionReactivaTest`         | Aceptación reactiva (WebTestClient) | 5     |
-| **Total**                        |                                     | **251** |
+| **Total**                        |                                     | **299** |
 
 ### Tests de integración (requieren Docker)
 
@@ -732,8 +854,10 @@ src/main/java/com/cursosdedesarrollo/webfluxapp/
 │   │   │   └── EmpleadoController.java          # 1:1 Empleados / Contratos
 │   │   ├── unoaene/
 │   │   │   └── ProyectoController.java          # 1:N Proyectos / Tareas
-│   │   └── naem/
-│   │       └── EstudianteController.java        # N:M Estudiantes / Cursos / Matriculaciones
+│   │   ├── naem/
+│   │   │   └── EstudianteController.java        # N:M Estudiantes / Cursos / Matriculaciones
+│   │   └── embebido/
+│   │       └── PedidoController.java            # Embedding Pedidos / Líneas embebidas
 │   ├── domain/
 │   │   ├── Person.java                          # Entidad MongoDB
 │   │   ├── Persona.java                         # Ejemplo de dominio simple
@@ -743,10 +867,13 @@ src/main/java/com/cursosdedesarrollo/webfluxapp/
 │   │   ├── unoaene/
 │   │   │   ├── Proyecto.java
 │   │   │   └── Tarea.java
-│   │   └── naem/
-│   │       ├── Estudiante.java
-│   │       ├── Curso.java
-│   │       └── Matriculacion.java               # Colección intermedia N:M
+│   │   ├── naem/
+│   │   │   ├── Estudiante.java
+│   │   │   ├── Curso.java
+│   │   │   └── Matriculacion.java               # Colección intermedia N:M
+│   │   └── embebido/
+│   │       ├── Pedido.java                      # Documento raíz con lista embebida
+│   │       └── LineaPedido.java                 # Subdocumento embebido (sin @Document)
 │   ├── dto/
 │   │   ├── PersonDTO.java
 │   │   ├── unoauno/
@@ -754,10 +881,12 @@ src/main/java/com/cursosdedesarrollo/webfluxapp/
 │   │   │   └── CrearEmpleadoConContratoRequest.java
 │   │   ├── unoaene/
 │   │   │   └── ProyectoConTareasDTO.java
-│   │   └── naem/
-│   │       ├── MatriculacionConCursoDTO.java    # Matrícula + curso resuelto
-│   │       ├── EstudianteConMatriculasDTO.java  # Estudiante + lista de matrículas resueltas
-│   │       └── MatricularRequest.java
+│   │   ├── naem/
+│   │   │   ├── MatriculacionConCursoDTO.java    # Matrícula + curso resuelto
+│   │   │   ├── EstudianteConMatriculasDTO.java  # Estudiante + lista de matrículas resueltas
+│   │   │   └── MatricularRequest.java
+│   │   └── embebido/
+│   │       └── PedidoConTotalDTO.java           # Pedido + total calculado con map
 │   ├── repositories/
 │   │   ├── ReactivePersonRepository.java
 │   │   ├── unoauno/
@@ -766,18 +895,22 @@ src/main/java/com/cursosdedesarrollo/webfluxapp/
 │   │   ├── unoaene/
 │   │   │   ├── ProyectoRepository.java
 │   │   │   └── TareaRepository.java
-│   │   └── naem/
-│   │       ├── EstudianteRepository.java
-│   │       ├── CursoRepository.java
-│   │       └── MatriculacionRepository.java
+│   │   ├── naem/
+│   │   │   ├── EstudianteRepository.java
+│   │   │   ├── CursoRepository.java
+│   │   │   └── MatriculacionRepository.java
+│   │   └── embebido/
+│   │       └── PedidoRepository.java            # findByEstado + findByLineasProducto
 │   ├── services/
 │   │   ├── PersonService.java
 │   │   ├── unoauno/
 │   │   │   └── EmpleadoService.java             # flatMap + zipWith (1:1)
 │   │   ├── unoaene/
 │   │   │   └── ProyectoService.java             # flatMapMany (1:N)
-│   │   └── naem/
-│   │       └── MatriculacionService.java        # flatMapMany + zipWith + collectList (N:M)
+│   │   ├── naem/
+│   │   │   └── MatriculacionService.java        # flatMapMany + zipWith + collectList (N:M)
+│   │   └── embebido/
+│   │       └── PedidoService.java               # map síncrono + flatMap escritura (embedding)
 │   └── websocket/
 │       ├── WebSocketConfiguration.java
 │       └── WebSocketHandler.java
